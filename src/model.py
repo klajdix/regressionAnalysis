@@ -10,44 +10,72 @@ from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# **File Paths**
-DATA_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/data/featured_data.csv"
+INPUT_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/data/featured_data.csv"
 MODEL_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/models/best_model.pkl"
 PREPROCESSOR_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/models/preprocessor.pkl"
 RESULTS_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/results/model_performance.csv"
 
-# Ensure model directory exists
+os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 os.makedirs(os.path.dirname(PREPROCESSOR_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
 
 def load_data():
-    """Load dataset."""
-    return pd.read_csv(DATA_PATH)
+    """Load dataset from CSV file."""
+    try:
+        df = pd.read_csv(INPUT_PATH)
+        print(f"✅ Successfully loaded dataset from {INPUT_PATH}")
+        return df
+    except FileNotFoundError:
+        print(f"❌ ERROR: File not found at {INPUT_PATH}")
+        exit()
+
+def clean_floor_level(df):
+    """Convert textual floor levels into numerical values"""
+    mapping = {
+        "ground": 0,
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+        "penthouse": 10
+    }
+    df["floor_level"] = df["floor_level"].astype(str).str.lower().map(mapping).fillna(df["floor_level"])
+    df["floor_level"] = pd.to_numeric(df["floor_level"], errors="coerce")
+    return df
 
 def preprocess_data(df):
-    """Create and fit a preprocessor for categorical and numerical features."""
-    categorical_features = ["city", "neighborhood", "property_type", "heating_type"]
-    numerical_features = ["square_meters", "num_bedrooms", "num_bathrooms", "floor_level", "distance_to_center_km", "house_age"]
-    
-    # Define preprocessing pipeline
-    preprocessor = ColumnTransformer([
-        ("num", StandardScaler(), numerical_features),
-        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features)
-    ])
-    
-    # Drop target variable
-    X = df.drop(columns=['price_eur', 'year_built'])
-    y = df['price_eur']
+    """Preprocess the dataset: encode categorical variables and scale numerical ones."""
 
-    # Fit & transform data
+    df = clean_floor_level(df)  
+
+    categorical_features = ['city', 'neighborhood', 'property_type', 'heating_type']
+    numerical_features = ['square_meters', 'num_bedrooms', 'num_bathrooms', 
+                          'floor_level', 'distance_to_center_km', 'house_age']
+
+    y = df['price_eur']
+    X = df.drop(columns=['price_eur', 'year_built', 'price_per_sq_meter'], errors='ignore')
+
+    for col in categorical_features:
+        if col in X.columns:
+            X[col] = X[col].astype(str)
+
+    categorical_transformer = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+    numerical_transformer = StandardScaler()
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numerical_transformer, numerical_features),
+            ('cat', categorical_transformer, categorical_features)
+        ]
+    )
+
     X_transformed = preprocessor.fit_transform(X)
 
-    # ✅ Save the preprocessor
-    joblib.dump(preprocessor, PREPROCESSOR_PATH)
-
-    return X_transformed, y
+    return X_transformed, y, preprocessor
 
 def train_and_evaluate_models(X_train, X_test, y_train, y_test):
     """Train models and evaluate performance."""
+    
     models = {
         "Linear Regression": LinearRegression(),
         "Ridge Regression": Ridge(alpha=1.0),
@@ -61,33 +89,32 @@ def train_and_evaluate_models(X_train, X_test, y_train, y_test):
     for name, model in models.items():
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
-        
+
+        mae = mean_absolute_error(y_test, y_pred)
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = np.sqrt(mse)
         r2 = r2_score(y_test, y_pred)
-        results[name] = {
-            "MAE": mean_absolute_error(y_test, y_pred),
-            "MSE": mean_squared_error(y_test, y_pred),
-            "RMSE": np.sqrt(mean_squared_error(y_test, y_pred)),
-            "R2 Score": r2
-        }
-        
-        # Select the best model based on R2 Score
+
+        results[name] = {"MAE": mae, "MSE": mse, "RMSE": rmse, "R2 Score": r2}
+
         if r2 > best_r2:
             best_r2 = r2
             best_model = model
-    
+
     return best_model, results
 
 if __name__ == "__main__":
     df = load_data()
-    X_transformed, y = preprocess_data(df)
     
-    X_train, X_test, y_train, y_test = train_test_split(X_transformed, y, test_size=0.2, random_state=42)
+    X, y, preprocessor = preprocess_data(df)
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
     best_model, results = train_and_evaluate_models(X_train, X_test, y_train, y_test)
 
-    # ✅ Save the best model
     joblib.dump(best_model, MODEL_PATH)
-    
+    joblib.dump(preprocessor, PREPROCESSOR_PATH)
+
     results_df = pd.DataFrame(results).T
     results_df.to_csv(RESULTS_PATH)
 

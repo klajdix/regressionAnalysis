@@ -1,42 +1,64 @@
 import pandas as pd
-import joblib
 import numpy as np
+import joblib
+import os
 
-# Define paths
 MODEL_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/models/best_model.pkl"
 PREPROCESSOR_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/models/preprocessor.pkl"
-FEATURED_DATA_PATH = "/Users/klajdtopuzi/Desktop/DataAnalysis/regressionAnalysis/data/featured_data.csv"
 
-# Load model & preprocessor
 def load_model():
-    """Load trained model from file."""
-    return joblib.load(MODEL_PATH)
+    """Load trained model and preprocessor."""
+    if not os.path.exists(MODEL_PATH) or not os.path.exists(PREPROCESSOR_PATH):
+        print("❌ ERROR: Model or preprocessor file not found.")
+        exit()
 
-def load_preprocessor():
-    """Load saved preprocessor."""
-    return joblib.load(PREPROCESSOR_PATH)
+    model = joblib.load(MODEL_PATH)
+    preprocessor = joblib.load(PREPROCESSOR_PATH)
+    print("✅ Model and preprocessor loaded successfully.")
+    return model, preprocessor
 
-def make_prediction(input_data, preprocessor):
-    """Predict house price using the trained model."""
-    model = load_model()
+def clean_floor_level(floor):
+    """Convert textual floor levels into numerical values"""
+    mapping = {
+        "ground": 0,
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+        "penthouse": 10
+    }
+    return mapping.get(str(floor).lower(), floor)  
 
-    # Apply preprocessing
+def make_prediction(input_data, preprocessor, model):
+    """Prepare data and make price prediction."""
+    categorical_features = ['city', 'neighborhood', 'property_type', 'heating_type']
+    for col in categorical_features:
+        input_data[col] = input_data[col].astype(str)
+
+    
+    input_data["floor_level"] = input_data["floor_level"].apply(clean_floor_level)
+
     input_transformed = preprocessor.transform(input_data)
 
     prediction = model.predict(input_transformed)
-    return prediction
+    return prediction[0]
 
 if __name__ == "__main__":
-    # Load dataset and sample a row
-    df = pd.read_csv(FEATURED_DATA_PATH)
+    model, preprocessor = load_model()
 
-    # Select a sample row for prediction (drop price_eur)
-    sample_data = df.drop(columns=['price_eur', 'year_built']).iloc[[0]]  
+    sample_data = pd.DataFrame([{
+        "city": "5",
+        "neighborhood": "0",
+        "property_type": "2",
+        "square_meters": 96.0,
+        "num_bedrooms": 2,
+        "num_bathrooms": 1,
+        "floor_level": "first",  
+        "heating_type": "central",
+        "distance_to_center_km": 6.5,
+        "house_age": 11.0
+    }])
 
-    # Load preprocessor
-    preprocessor = load_preprocessor()
+    predicted_price = make_prediction(sample_data, preprocessor, model)
 
-    # Make prediction
-    predicted_price = make_prediction(sample_data, preprocessor)
-
-    print(f"🏡 Predicted house price: {predicted_price[0]:,.2f} EUR")
+    print(f"🏡 Predicted house price: {predicted_price:,.2f} EUR")
